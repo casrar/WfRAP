@@ -1,7 +1,7 @@
 """
 \\          //     ////      ////      //// 
  \\  //\\  //     ||__//   ||___//   ||___//    
-  \\//  \\//   f  ||  \\   ||   //   ||    
+  \\//  \\//   f  ||  \\   ||   //   ||     
 
   A simple wrapper for the Reddit API. Part project to learn about APIs also
   partly useful so I can use it in other projects to make my life sweet as pie.
@@ -11,29 +11,27 @@
 
   Author: Casey Morar (casrar)
   License: no clue
-  Version: 0.1
+  Version: 1.0.0
 
     TODO:
         !!Define several functions, general search, title search, content search(body and comments), username search are the core 
         !!Make into a class, more maintainable, can define var in constructor 
+        !! make class structure make more sense, add in Oauth and such 
         !Work out functionality 
         !ADD IN TRY CATCHES, moreso just error handling
-        !!! GET COMMENTS WORKING
+        !figure out how many entities it returns 
+        !standardize naming conventions, and functions, make it make more sense 
     ERROR:
-        Cant get comment working, as of RN it is deprecated 
-        Im not sure why the amount of posts it returns is variable, kinda confusing
-    
+        Make search all comments more robust, breaks on certain pages
     THOUGHTS:
         More maintainable? or faster? 
         Create another methodto traverse posts, DRY, title and body repeat same code
-        Base functionality is complete, MVP achieved, now is just figuring out comments
-        
+        Im not sure why the amount of posts it returns is variable, kinda confusing
 
 """
 
 
 import requests
-from typing import Union
 
 class Search:
 
@@ -54,6 +52,9 @@ class Search:
     def _request_body(self, request: requests, i: int) -> requests:
         return request['data']['children'][i]['data']['selftext']
 
+    def _request_permalink(self, request: requests, i: int) -> requests:
+        return request['data']['children'][i]['data']['permalink']
+
     # Searches all entites on a specific subreddit at a specific page, basis of all other search functions 
     def _search_request(self, subreddit: str, listing: str) -> requests:
         try:
@@ -66,23 +67,37 @@ class Search:
             print('An Error Occured')
             return request.json()
     
-    # Returns list of all titles in a subreddit up to 1000 entities
+    # Returns list of all titles in a subreddit, up to ()
     def search_all_titles(self, subreddit: str) -> list:
-        title_list = []
+        url_list = []
         request = self._search_request(subreddit=subreddit, listing='')
         while True:
             num_dist = self._request_dist(request=request)
             # print(num_dist)
             # change back to for loop
-            title_list.append([self._request_title(request=request, i=i) for i in range(num_dist)])
+            url_list.append([self._request_title(request=request, i=i) for i in range(num_dist)])
             # print(title_list)
             new_listing = self._request_after(request=request)
             # print(new_listing)
             if (str(new_listing) == 'None'):
-                return title_list
+                return url_list
             request = self._search_request(subreddit=subreddit, listing=new_listing)
 
-    # Returns list of all post bodies in a subreddit, up to 1000 entries 
+    # Returns list of all url in a subreddit, up to ()
+    def _get_all_links(self, subreddit: str) -> list:
+        permalink_list = []
+        request = self._search_request(subreddit=subreddit, listing='')
+        while True:
+            num_dist = self._request_dist(request=request)
+            for i in range(num_dist):
+                permalink_list.append(self._request_permalink(request=request, i=i))
+
+            new_listing = self._request_after(request=request)
+            if (str(new_listing) == 'None'):
+                return permalink_list
+            request = self._search_request(subreddit=subreddit, listing=new_listing)
+
+    # Returns list of all post bodies in a subreddit, up to () 
     def search_all_post_body(self, subreddit: str) -> list: 
         body_list = []
         request = self._search_request(subreddit=subreddit, listing='')
@@ -94,7 +109,6 @@ class Search:
             # changed back to traditional for loop, my list comprehension was nesting my loops
             for i in range(num_dist):
                 body_list.append(self._request_body(request=request, i=i))
-                count = count+1
             # Deprecated
             # body_list.append([self._request_body(request=request, i=i) for i in range(num_dist)])
 
@@ -106,53 +120,39 @@ class Search:
                 return body_list
             request = self._search_request(subreddit=subreddit, listing=new_listing)
 
-    def search_all_comments(self) -> None:
-        url = 'https://www.reddit.com/r/linux_gaming/comments/reup3p/openrazer_32_released_for_supporting_more_razer/.json' 
-        request = requests.get(url, headers = {'User-agent': 'a'})
-        request = request.json()
-        # print(len(request[0]['data']['children'][0]['data']['subreddit']))
-        # print(request[0]['kind']['children'])
-        
-        # print(request[0]['data']['children'][0]['kind'])
+    # Returns list of all comments in subreddit, up to ()
+    # TODO - Abstract some of the searching and clean up the functions, a lot of patchwork going on
+    # TODO - breaks if wikipage is present, account for other types of pages
+    def search_all_comments(self, subreddit: str) -> list:
+        permalink_list = self._get_all_links(subreddit=subreddit)
         comments = []
-        self._search_all_comments(request[1]['data']['children'], comments)
+        for permalink in permalink_list:
+            permalink = 'https://www.reddit.com' + permalink + '.json'
+            print(permalink)
+            request = requests.get(permalink, headers={'User-agent' : 'test'}).json()
+            self._search_all_comments(request[1]['data']['children'], comments) # turn into a function
+        
         return comments
 
-
-    # Currently deprecated until I can figure out wtf to do
-    # I figured out wtf to do, god bless recursion 
-    def _search_all_comments(self, request: requests, comments: list): #-> requests & list:
+    # Function that parses post and returns all comments // May be missing certain functionality 
+    def _search_all_comments(self, request: requests, comments: list) -> None:
         for i in range(len(request)):
-            comment = request[i]['data']['replies'] # turn into a  function
-            # print(str(name))
+            if request[i]['kind'] == 'more': # skip if not comment/reply
+                continue
+
+            comment = request[i]['data']['replies'] # turn into a function
             if comment == "":
-                comment_body = request[i]['data']['body']
+                comment_body = request[i]['data']['body'] # turn into a function
                 comments.append(comment_body)
             else:
-                children = comment['data']['children']
+                children = comment['data']['children'] # turn into a function
                 self._search_all_comments(children, comments)
-                comment_body = request[i]['data']['body']
+                comment_body = request[i]['data']['body'] # turn into a function
                 comments.append(comment_body)
-                
-            #pass
-        # iterate over reply[i][data]
-        #for comments in request
-            # if replies != ""
-                # search (request['replies']['data']['children'])
-            # else 
-                # comments.append(request['body'])
     
     def test(self) -> None:
-        # request = requests.get('https://www.reddit.com/r/linux_gaming/comments/reup3p/openrazer_32_released_for_supporting_more_razer/.json')
-        # request = request.json()
-        url = 'https://www.reddit.com/r/linux_gaming/comments/reup3p/openrazer_32_released_for_supporting_more_razer/.json' 
-        request = requests.get(url, headers = {'User-agent': 'a'})
-        request = request.json()
-        test1 = request[0]['data']['children'][0]['data']['preview']
-        print(test1)
-        print('\n\n\n\n\n')
-        test2 = test1['images'][0]['resolutions'][0]['url']
-        print(test2)
+        pass
+       
 
 
 
